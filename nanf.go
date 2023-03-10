@@ -48,7 +48,6 @@ func parseNaNFstr(x string) (nanf *NameAndNumberForm, err error) {
 		err = errorf("No opening parenthesis for parseNaNFstr to read")
 		return
 	}
-	nanf = new(NameAndNumberForm)
 
 	n := x[idx+1 : len(x)-1]
 	if !isDigit(n) {
@@ -56,37 +55,49 @@ func parseNaNFstr(x string) (nanf *NameAndNumberForm, err error) {
 		return
 	}
 
+	var valid bool
+	if valid, err = identifierIsValid(x[:idx-1]); !valid {
+		return
+	}
+
+	nanf = new(NameAndNumberForm)
 	f, _ := atoi(n)
 	nanf.primaryIdentifier = uint(f)
 
-	for c := 0; c < len(x[:idx-1]); c++ {
-		ch := rune(x[c])
-
-		if c == 0 {
-			if !('a' <= ch && ch <= 'z') {
-				err = errorf("Bad identifier '%s' at char #%d [%c] [hint: must only start with lowercase alpha]", x[:idx-1], c, ch)
-				return
-			}
-		}
-
-		if ('a' <= ch && ch <= 'z') ||
-			('A' <= ch && ch <= 'Z') ||
-			('0' <= ch && ch <= '9') || ch == '-' {
-			// cool
-		} else {
-			err = errorf("Bad identifier '%s' at char #%d [%c], unsupported character(s) [hint: must be A-Z, a-z, 0-9 or '-']", x[:idx-1], c, ch)
-			return
-		}
-
-		if c == idx-1 {
-			if ch == '-' {
-				err = errorf("Bad identifier '%s' at char #%d [%c] [hint: final identifier character cannot be a hyphen]", x[:idx-1], c, ch)
-			}
-		}
-	}
-
 	// identifier seems safe to assign
 	nanf.identifier = x[:idx]
+	return
+}
+
+func identifierIsValid(val string) (valid bool, err error) {
+        for c := 0; c < len(val); c++ {
+                ch := rune(val[c])
+
+                if c == 0 {
+                        if !('a' <= ch && ch <= 'z') {
+                                err = errorf("Bad identifier '%s' at char #%d [%c] [hint: must only start with lowercase alpha]", val, c, ch)
+                                return
+                        }
+                }
+
+                if ('a' <= ch && ch <= 'z') ||
+                        ('A' <= ch && ch <= 'Z') ||
+                        ('0' <= ch && ch <= '9') || ch == '-' {
+                        // cool
+                } else {
+                        err = errorf("Bad identifier '%s' at char #%d [%c], unsupported character(s) [hint: must be A-Z, a-z, 0-9 or '-']", val, c, ch)
+                        return
+                }
+
+                if c == len(val)-1 {
+                        if ch == '-' {
+                                err = errorf("Bad identifier '%s' at char #%d [%c] [hint: final identifier character cannot be a hyphen]", val, c, ch)
+				return
+                        }
+                }
+        }
+
+	valid = true
 	return
 }
 
