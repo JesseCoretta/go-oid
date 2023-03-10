@@ -2,9 +2,6 @@ package oid
 
 import (
 	"encoding/asn1"
-	"errors"
-	"fmt"
-	"strconv"
 	"strings"
 )
 
@@ -13,15 +10,19 @@ ObjectIdentifier facilitates the storage, and varied representation of, an ASN.1
 a manner that goes beyond mere dotNotation and may be more convenient than using the asn1.ObjectIdentifier instance.
 */
 type ObjectIdentifier struct {
-	nANF, aka []string
-	ints      []int
+	nANF []NameAndNumberForm
+	aka  []string
 }
 
 /*
 ASN1 returns a populated instance of asn1.ObjectIdentifier using the contents of the receiver.
 */
-func (o ObjectIdentifier) ASN1() asn1.ObjectIdentifier {
-	return asn1.ObjectIdentifier(o.ints)
+func (o ObjectIdentifier) ASN1() (a asn1.ObjectIdentifier) {
+	a = make(asn1.ObjectIdentifier, len(o.nANF), len(o.nANF))
+	for i := 0; i < len(o.nANF); i++ {
+		a[i] = int(o.nANF[i].primaryIdentifier)
+	}
+	return
 }
 
 /*
@@ -32,9 +33,7 @@ This method supports asn1.ObjectIdentifier, []int, string and []string type inst
 func (o ObjectIdentifier) Equal(x any) bool {
 	switch tv := x.(type) {
 	case asn1.ObjectIdentifier:
-		return intSliceEqual([]int(tv), o.ints)
-	case []int:
-		return intSliceEqual(tv, o.ints)
+		return intSliceEqual([]int(tv), []int(o.ASN1()))
 	case string:
 		if o.ASN1().String() == tv {
 			// dotNotation
@@ -51,7 +50,16 @@ func (o ObjectIdentifier) Equal(x any) bool {
 			}
 		}
 	case []string:
-		return strSliceEqual(o.nANF, tv)
+		if len(o.nANF) != len(tv) {
+			return false
+		}
+
+		for i := 0; i < len(o.nANF); i++ {
+			if o.nANF[i].String() != tv[i] {
+				return false
+			}
+		}
+		return true
 	}
 
 	return false
@@ -62,31 +70,12 @@ String returns the ASN.1 NameAndNumberForm sequence stored within the receiver i
 
 	{ iso(1) identified-organization(3) dod(6) }
 */
-func (o ObjectIdentifier) String() string {
-	return `{ ` + strings.Join(o.nANF, ` `) + ` }`
-}
-
-/*
-NameAndNumberForm returns the effective ASN.1 NameAndNumberForm arc value for the receiver as an instance of [2]string. The first slice contains the identifier name (and is optional), while the second slice contains the integer string representation and is absolutely required in all cases.
-
-For example, for { iso(1) identified-organization(3) dod(6) }, this method would return [2]string{`dod`, `6`}.
-*/
-func (o ObjectIdentifier) NameAndNumberForm() (nanf [2]string) {
-	if len(o.nANF) == 0 || len(o.ints) == 0 {
-		return
+func (o ObjectIdentifier) String() (a string) {
+	a = `{`
+	for i := 0; i < len(o.nANF); i++ {
+		a += sprintf(" %s", o.nANF[i])
 	}
-
-	number := strconv.Itoa(o.ints[len(o.ints)-1])
-	nanf = [2]string{"", number}
-	name := o.nANF[len(o.nANF)-1]
-	idx := strings.IndexRune(name, '(')
-	if idx == -1 {
-		// number only is fine.
-		return
-	}
-
-	// we found a name, so add it to the payload
-	nanf[0] = name[:idx]
+	a += ` }`
 
 	return
 }
@@ -106,49 +95,9 @@ func (o ObjectIdentifier) Valid() bool {
 		return false
 	}
 
-	if len(o.nANF) != len(o.ints) {
-		return false
-	}
-
-	// no negative numbers!
-	for _, arc := range o.ints {
-		if arc < 0 {
-			return false
-		}
-	}
-
 	// If the first arc is 0, 1 or 2,
 	// then we passed verification.
-	return 0 <= o.ints[0] && o.ints[0] <= 2
-}
-
-/*
-oidToIntSlices converts a variety of dotNotation-based types into an []int instance.
-*/
-func oidToIntSlices(oid any) []int {
-	switch tv := oid.(type) {
-	case *ObjectIdentifier:
-		return oidToIntSlices(tv.ints)
-	case ObjectIdentifier:
-		return oidToIntSlices(tv.ints)
-	case string:
-		arcs := strings.Split(tv, `.`)
-		O := make([]int, len(arcs), len(arcs))
-		for idx, arc := range arcs {
-			u, err := strconv.Atoi(arc)
-			if err != nil {
-				return []int{}
-			}
-			O[idx] = u
-		}
-		return O
-	case asn1.ObjectIdentifier:
-		return []int(tv)
-	case []int:
-		return tv
-	}
-
-	return []int{}
+	return 0 <= o.nANF[0].primaryIdentifier && o.nANF[0].primaryIdentifier <= 2
 }
 
 /*
@@ -174,6 +123,16 @@ AltNames returns slices of string values, each representing an alternate name by
 */
 func (o ObjectIdentifier) AltNames() []string { return o.aka }
 
+func (o ObjectIdentifier) len() int { return len(o.nANF) }
+
+func (o ObjectIdentifier) NameAndNumberForm() (nanf NameAndNumberForm) {
+	if o.len() == 0 {
+		return
+	}
+
+	return o.nANF[len(o.nANF)-1]
+}
+
 /*
 NewObjectIdentifier creates an instance of ObjectIdentifier and returns it alongside an error.
 
@@ -187,62 +146,38 @@ Not all NameAndNumberForm values (arcs) require actual names; they can be number
 
 ... is perfectly valid but generally not recommended when clarity is desired.
 */
-func NewObjectIdentifier(raw string) (o *ObjectIdentifier, err error) {
-	if len(raw) < 6 {
-		err = errorf("Provide the proper ASN.1 notation (e.g.: '{ iso(1) org(3) dod(6) }')")
-		return
-	}
-
+func NewObjectIdentifier(x any) (o *ObjectIdentifier, err error) {
 	t := new(ObjectIdentifier)
-	o = new(ObjectIdentifier)
-	f := strings.Fields(strings.TrimRight(strings.TrimLeft(raw, `{ `), ` }`))
 
-	for i := 0; i < len(f); i++ {
-		if len(f[i]) == 0 {
-			err = errorf("Bad ASN.1 notation field '%s'", f[i])
-			return
-		}
-
-		switch isDigit(f[i]) {
-		case true:
-			// we know its a number, so no need to check error
-			num, _ := strconv.Atoi(f[i])
-			t.ints = append(t.ints, num)
-		default:
-			// last char should be closing paren [ ")" ]
-			idxr := strings.IndexRune(f[i], ')')
-			if idxr != len(f[i])-1 {
-				err = errorf("Bad identifier '%s' (raw: %#v)", f[i], f)
+	switch tv := x.(type) {
+	case string:
+		f := fields(trimR(trimL(tv, `{ `), ` }`))
+		for i := 0; i < len(f); i++ {
+			var nanf *NameAndNumberForm
+			if nanf, err = NewNameAndNumberForm(f[i]); err != nil {
 				return
 			}
-
-			// check everything before opening paren [ "(" ]
-			idxl := strings.IndexRune(f[i], '(')
-			for c := 0; c < idxl; c++ {
-				ch := rune(f[i][c])
-				if ('a' <= ch && ch <= 'z') ||
-					('A' <= ch && ch <= 'Z') ||
-					('0' <= ch && ch <= '9') || ch == '-' {
-					// cool
-				} else {
-					err = errorf("Bad identifier '%s' at char #%d [%c]", f[i], c, ch)
-					return
-				}
-			}
-
-			// check everything between parens to ensure digits only [ "(%d)" ]
-			if !isDigit(f[i][idxl+1 : idxr-1]) {
-				err = errorf("Bad identifier '%s' at chars #%d[%c] through #%d[%c]", f[i], idxl, f[i][idxl], idxr, f[i][idxr])
+			t.nANF = append(t.nANF, *nanf)
+		}
+	case []string:
+		for i := 0; i < len(tv); i++ {
+			var nanf *NameAndNumberForm
+			if nanf, err = NewNameAndNumberForm(tv[i]); err != nil {
 				return
 			}
-
-			// we know its a number, so no need to check error
-			num, _ := strconv.Atoi(f[i][idxl+1 : idxr])
-			t.ints = append(t.ints, num)
+			t.nANF = append(t.nANF, *nanf)
 		}
-
-		// Seems safe to append current slice
-		t.nANF = append(t.nANF, f[i])
+	case []int:
+		for i := 0; i < len(tv); i++ {
+			var nanf *NameAndNumberForm
+			if nanf, err = NewNameAndNumberForm(tv[i]); err != nil {
+				return
+			}
+			t.nANF = append(t.nANF, *nanf)
+		}
+	default:
+		err = errorf("Unsupported %T input type %T\n", *o, x)
+		return
 	}
 
 	if !t.Valid() {
@@ -250,68 +185,8 @@ func NewObjectIdentifier(raw string) (o *ObjectIdentifier, err error) {
 		return
 	}
 
+	o = new(ObjectIdentifier)
 	*o = *t
 
 	return
 }
-
-/*
-quick check to see if a string is effectively an integer.
-*/
-func isDigit(val string) bool {
-	for _, c := range val {
-		if '0' <= c && c <= '9' {
-			continue
-		}
-		return false
-	}
-	return true
-}
-
-func errorf(msg any, x ...any) error {
-	switch tv := msg.(type) {
-	case string:
-		return errors.New(fmt.Sprintf(tv, x...))
-	case error:
-		return errors.New(fmt.Sprintf(tv.Error(), x...))
-	}
-
-	return nil
-}
-
-/*
-compare slice members of two (2) []int instances.
-*/
-func intSliceEqual(s1, s2 []int) (equal bool) {
-	if len(s1)|len(s2) == 0 || len(s1) != len(s2) {
-		return
-	}
-
-	for i := 0; i < len(s1); i++ {
-		if s1[i] != s2[i] {
-			return
-		}
-	}
-
-	equal = true
-	return
-}
-
-/*
-compare slice members of two (2) []string instances.
-*/
-func strSliceEqual(s1, s2 []string) (equal bool) {
-	if len(s1)|len(s2) == 0 || len(s1) != len(s2) {
-		return
-	}
-
-	for i := 0; i < len(s1); i++ {
-		if s1[i] != s2[i] {
-			return
-		}
-	}
-
-	equal = true
-	return
-}
-
