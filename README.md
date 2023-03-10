@@ -1,4 +1,7 @@
 # go-oid
+
+[![Go Report Card](https://goreportcard.com/badge/JesseCoretta/go-oid)](https://goreportcard.com/report/github.com/JesseCoretta/go-oid) [![GoDoc](https://godoc.org/github.com/JesseCoretta/go-oid?status.svg)](https://godoc.org/github.com/JesseCoretta/go-oid)
+
 Package oid offers a convenient ASN.1 Object Identifier type and associated methods.
 
 ASN.1 Object Identifiers encompass information that goes beyond their dotted representation. This tiny package merely facilitates the handling of ASN.1 NameAndNumberForm values and alternate names that may be associated with a given OID in the wild.
